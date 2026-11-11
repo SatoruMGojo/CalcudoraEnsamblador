@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="CalcudoraEnsamblador/CalcudoraEnsamblador.vcxproj" Id="f1eadff7-e18d-4ec9-b8b6-46e6d9673db4" />
+</Solution>
