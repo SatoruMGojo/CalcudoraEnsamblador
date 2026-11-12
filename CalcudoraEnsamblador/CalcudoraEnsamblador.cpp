@@ -12,11 +12,9 @@
 #include <cmath>
 #include <string>
 
-// ------------------------------------------------------------
 // Funciones en ensamblador (un .asm por funcion).
 // Todas devuelven: 0 = ok, 1 = error matematico, 2 = puntero nulo.
 // Los nombres deben coincidir EXACTAMENTE con los de los .asm.
-// ------------------------------------------------------------
 extern "C" int Division(unsigned long long dividendo,
                         unsigned long long divisor,
                         unsigned long long* cociente,
@@ -74,9 +72,7 @@ static std::wstring formato(double v) {
     return buf;
 }
 
-// ============================================================
 // CONEXION CON EL ENSAMBLADOR
-// ============================================================
 
 // Division con signo: el ASM trabaja sin signo, el signo se maneja aqui.
 static bool dividir(long long ia, long long ib, long long &res) {
