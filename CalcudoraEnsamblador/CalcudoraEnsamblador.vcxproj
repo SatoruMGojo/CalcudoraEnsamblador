@@ -158,6 +158,8 @@
   <ItemGroup>
     <MASM Include="resta.asm" />
     <MASM Include="suma.asm" />
+    <MASM Include="multiplicacion.asm" />
+    <MASM Include="division.asm" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

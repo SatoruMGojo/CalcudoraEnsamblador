@@ -53,5 +53,11 @@
     <MASM Include="resta.asm">
       <Filter>Source Files</Filter>
     </MASM>
+    <MASM Include="multiplicacion.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
+    <MASM Include="division.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
   </ItemGroup>
 </Project>
