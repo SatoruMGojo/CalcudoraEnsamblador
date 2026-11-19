@@ -15,7 +15,13 @@
 // Funciones en ensamblador (un .asm por funcion).
 // Todas devuelven: 0 = ok, 1 = error matematico, 2 = puntero nulo.
 // Los nombres deben coincidir EXACTAMENTE con los de los .asm.
-
+extern "C" {
+    int Suma(long long a, long long b, long long* res);
+    int Resta(long long a, long long b, long long* res);
+    int Multiplicacion(long long a, long long b, long long* res);
+    int Division(unsigned long long a, unsigned long long b,
+        unsigned long long* cociente, unsigned long long* residuo);
+}
 
 // Identificadores de los controles.
 #define ID_BOTON_BASE 200
