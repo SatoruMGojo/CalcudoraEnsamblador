@@ -6,21 +6,25 @@
 #endif
 
 #include <windows.h>
-#include <climits>
-#include <cstdio>
+#include <cstdlib>
 #include <cwchar>
-#include <cmath>
 #include <string>
 
 // Funciones en ensamblador (un .asm por funcion).
-// Todas devuelven: 0 = ok, 1 = error matematico, 2 = puntero nulo.
-// Los nombres deben coincidir EXACTAMENTE con los de los .asm.
+// Los nombres deben coincidir EXACTAMENTE con los PROC de los .asm.
+//
+// Suma, Resta, Multiplicacion: 0 = ok, 1 = error matematico (overflow), 2 = puntero nulo.
+// DivisionDec: 0 = ok, 1 = division entre cero, 2 = puntero nulo,
+//              3 = desbordamiento, 4 = decimales o n fuera de rango.
 extern "C" {
     int Suma(long long a, long long b, long long* res);
     int Resta(long long a, long long b, long long* res);
     int Multiplicacion(long long a, long long b, long long* res);
-    int Division(unsigned long long a, unsigned long long b,
-        unsigned long long* cociente, unsigned long long* residuo);
+    int DivisionDec(long long dividendo, long long divisor,
+        long long* cociente, long long* residuo,
+        char* digitos, unsigned long long n,
+        unsigned long long decDividendo, unsigned long long decDivisor,
+        int* negativo);
 }
 
 // Identificadores de los controles.
@@ -38,113 +42,154 @@ static const int ESPACIO = 5;
 static const int BTN_ANCHO = 60;
 static const int BTN_ALTO = 40;
 static const int PANTALLA_ALTO = 30;
-static const size_t MAX_DIGITOS = 15;
-
-// 2^53: mayor entero que un double representa sin perder precision.
-static const double LIMITE = 9007199254740992.0;
+static const size_t MAX_DIGITOS = 15;   // digitos maximos por numero
+static const size_t MAX_EXPR = 30;      // caracteres maximos de la expresion en pantalla
 
 // Estado de la calculadora.
 static HWND hPantalla = nullptr;
-static double acumulador = 0;
-static wchar_t operador = 0;
-static bool nuevoNumero = true;
-
-// Rechaza NaN, infinito y valores fuera de rango.
-static bool valido(double v) {
-    return std::isfinite(v) && std::fabs(v) <= LIMITE;
-}
-
-static std::wstring leerPantalla() {
-    wchar_t buf[64] = L"";
-    if (hPantalla) GetWindowTextW(hPantalla, buf, ARRAYSIZE(buf));
-    buf[ARRAYSIZE(buf) - 1] = 0;
-    return buf;
-}
+static std::wstring prefijo;            // todo lo escrito antes del numero actual ("6*2+")
+static std::wstring numActual;          // numero que se esta escribiendo ("", "-", "-5", "12")
+static long long acumulador = 0;        // resultado parcial (evaluacion de izquierda a derecha)
+static wchar_t operador = 0;            // operador pendiente
+static bool mostrandoResultado = false; // true despues de '=' o de un error
 
 static void mostrar(const std::wstring &s) {
     if (hPantalla) SetWindowTextW(hPantalla, s.c_str());
 }
 
-static std::wstring formato(double v) {
-    wchar_t buf[64];
-    // _TRUNCATE garantiza el terminador nulo. Los resultados son enteros.
-    _snwprintf_s(buf, ARRAYSIZE(buf), _TRUNCATE, L"%.0f", v);
-    return buf;
+// Muestra la operacion completa: "6*2+3". Si no hay nada, muestra 0.
+static void refrescar() {
+    std::wstring t = prefijo + numActual;
+    mostrar(t.empty() ? std::wstring(L"0") : t);
+}
+
+static void reiniciar() {
+    prefijo.clear();
+    numActual.clear();
+    acumulador = 0;
+    operador = 0;
+    mostrandoResultado = false;
+    mostrar(L"0");
+}
+
+static void mostrarError() {
+    reiniciar();
+    mostrar(L"UNDEFINED");
+    mostrandoResultado = true;          // el siguiente digito empieza de cero
+}
+
+// true si numActual ya tiene al menos un digito ("-" solo no cuenta).
+static bool hayNumero() {
+    return !numActual.empty() && numActual != L"-";
 }
 
 // CONEXION CON EL ENSAMBLADOR
 
-// Division con signo: el ASM trabaja sin signo, el signo se maneja aqui.
-static bool dividir(long long ia, long long ib, long long &res) {
-    bool negativo = (ia < 0) != (ib < 0);
-    unsigned long long ua = (ia < 0) ? 0ULL - (unsigned long long)ia : (unsigned long long)ia;
-    unsigned long long ub = (ib < 0) ? 0ULL - (unsigned long long)ib : (unsigned long long)ib;
-    unsigned long long cociente = 0, residuo = 0;
+// Division entera con signo: DivisionDec ya maneja los negativos.
+// n = 0 y decimales = 0 -> division entera (el cociente sale truncado).
+static bool dividir(long long a, long long b, long long &res) {
+    long long cociente = 0, residuo = 0;
+    char digitos[4] = {0};              // con n = 0 no se escribe, pero no puede ser NULL
+    int negativo = 0;
 
-    if (Division(ua, ub, &cociente, &residuo) != 0) return false;   // /0 o puntero nulo
-    if (cociente > (unsigned long long)LLONG_MAX) return false;
+    if (DivisionDec(a, b, &cociente, &residuo, digitos, 0, 0, 0, &negativo) != 0)
+        return false;                   // /0, overflow, puntero nulo...
 
-    res = negativo ? -(long long)cociente : (long long)cociente;
+    res = cociente;
     return true;
 }
 
-// Devuelve false si hay error (division entre cero, overflow, valor invalido).
-static bool ejecutarOperacion(double a, wchar_t op, double b, double &res) {
-    if (!valido(a) || !valido(b)) return false;
-
-    long long ia = (long long)a;    // seguro: ya validado
-    long long ib = (long long)b;
-    long long r = 0;
-
+// Devuelve false si hay error (division entre cero, overflow...).
+static bool ejecutarOperacion(long long a, wchar_t op, long long b, long long &res) {
     switch (op) {
-        case L'/': if (!dividir(ia, ib, r))             return false; break;
-        case L'+': if (Suma(ia, ib, &r) != 0)           return false; break;
-        case L'-': if (Resta(ia, ib, &r) != 0)          return false; break;
-        case L'*': if (Multiplicacion(ia, ib, &r) != 0) return false; break;
+        case L'/': return dividir(a, b, res);
+        case L'+': return Suma(a, b, &res) == 0;
+        case L'-': return Resta(a, b, &res) == 0;
+        case L'*': return Multiplicacion(a, b, &res) == 0;
         default:   res = b; return true;
     }
-
-    res = (double)r;
-    return valido(res);             // evita resultados que pierdan precision
-}
-
-static void reiniciar() {
-    acumulador = 0;
-    operador = 0;
-    nuevoNumero = true;
-    mostrar(L"0");
 }
 
 static void pulsarBoton(const wchar_t *etiqueta) {
     wchar_t c = etiqueta[0];
 
-    if (c >= L'0' && c <= L'9') {
-        std::wstring t = leerPantalla();
-        if (nuevoNumero || t == L"0") t = etiqueta;
-        else if (t.size() < MAX_DIGITOS) t += etiqueta;
-        nuevoNumero = false;
-        mostrar(t);
-    } else if (c == L'C') {
+    // ---- Borrar ----
+    if (c == L'C') {
         reiniciar();
-    } else {
-        // Operadores y '='
-        std::wstring txt = leerPantalla();
-        wchar_t *fin = nullptr;
-        double actual = wcstod(txt.c_str(), &fin);
-        if (fin == txt.c_str() || !valido(actual)) actual = 0;   // "UNDEFINED", "inf", "nan"...
-        double res = actual;
+        return;
+    }
 
-        if (operador != 0 && !nuevoNumero) {
-            if (!ejecutarOperacion(acumulador, operador, actual, res)) {
-                reiniciar();
-                mostrar(L"UNDEFINED");
-                return;
-            }
-            mostrar(formato(res));
+    // ---- Digitos ----
+    if (c >= L'0' && c <= L'9') {
+        if (mostrandoResultado) reiniciar();    // despues de '=' se empieza una operacion nueva
+
+        std::wstring nuevo = numActual;
+        if (nuevo == L"0") nuevo.clear();               // evita "05"
+        else if (nuevo == L"-0") nuevo = L"-";          // evita "-05"
+
+        size_t digitos = nuevo.size() - ((!nuevo.empty() && nuevo[0] == L'-') ? 1 : 0);
+        if (digitos >= MAX_DIGITOS || prefijo.size() + nuevo.size() >= MAX_EXPR) return;
+
+        numActual = nuevo + c;
+        refrescar();
+        return;
+    }
+
+    // ---- Operadores y '=' ----
+    // Despues de un resultado, '=' no hace nada y un operador sigue con ese resultado.
+    if (mostrandoResultado) {
+        if (c == L'=') return;
+        numActual = std::to_wstring(acumulador);
+        prefijo.clear();
+        operador = 0;
+        mostrandoResultado = false;
+    }
+
+    if (!hayNumero()) {
+        if (numActual == L"-") return;                  // signo suelto: falta el numero
+        if (c == L'-') {                                // '-' sin numero = signo negativo
+            numActual = L"-";
+            refrescar();
+            return;
         }
-        acumulador = res;
-        operador = (c == L'=') ? 0 : c;
-        nuevoNumero = true;
+        if (c == L'=') return;                          // nada que calcular
+        if (operador != 0) {                            // cambiar el operador pendiente
+            prefijo.back() = c;
+            operador = c;
+            refrescar();
+            return;
+        }
+        numActual = L"0";                               // operador al inicio: usa 0
+    }
+
+    // Evita que la expresion crezca sin limite (deja sitio para al menos un digito).
+    if (c != L'=' && prefijo.size() + numActual.size() + 2 > MAX_EXPR) return;
+
+    long long numero = wcstoll(numActual.c_str(), nullptr, 10);
+    long long res = numero;
+
+    if (operador != 0) {
+        if (!ejecutarOperacion(acumulador, operador, numero, res)) {
+            mostrarError();
+            return;
+        }
+    }
+    acumulador = res;
+
+    if (c == L'=') {
+        // Solo se ve el resultado.
+        prefijo = std::to_wstring(res);
+        numActual.clear();
+        operador = 0;
+        mostrandoResultado = true;
+        mostrar(prefijo);
+    } else {
+        // Se sigue viendo la operacion
+        prefijo += numActual;
+        prefijo += c;
+        numActual.clear();
+        operador = c;
+        refrescar();
     }
 }
 
