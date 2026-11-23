@@ -53,4 +53,30 @@ nulo:
     mov  eax, 2
     ret
 Multiplicacion ENDP
+MAX_DEC EQU 4      ; mismo limite que usa division.asm
+
+; int MultiplicacionDec(ll a, ll b, ll* res, ull decA, ull decB, ull* decRes)
+;   RCX = a, RDX = b, R8 = res, R9 = decA
+;   [rsp+40] = decB, [rsp+48] = decRes
+;   EAX: 0 = ok, 1 = desbordamiento, 2 = puntero nulo, 4 = decimales fuera de rango
+; Ejemplo: 1.5 * 2.25 -> a=15, decA=1, b=225, decB=2 -> res=3375, decRes=3 (3.375)
+MultiplicacionDec PROC
+    mov  r10, [rsp+40]        ; r10 = decB
+    mov  r11, [rsp+48]        ; r11 = puntero decRes
+    test r11, r11
+    jz   nuloD
+    cmp  r9, MAX_DEC
+    ja   rangoD
+    cmp  r10, MAX_DEC
+    ja   rangoD
+    add  r9, r10              ; decimales del resultado = decA + decB
+    mov  [r11], r9
+    jmp  Multiplicacion       ; RCX, RDX y R8 siguen intactos: reutiliza el ciclo
+nuloD:
+    mov  eax, 2
+    ret
+rangoD:
+    mov  eax, 4
+    ret
+MultiplicacionDec ENDP
 END
