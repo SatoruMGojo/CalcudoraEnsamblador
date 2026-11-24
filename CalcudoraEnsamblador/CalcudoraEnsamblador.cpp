@@ -5,10 +5,16 @@
 #define _UNICODE
 #endif
 
+// Evita conflictos entre Windows y std::numeric_limits
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <windows.h>
 #include <cstdlib>
 #include <cwchar>
 #include <string>
+#include <limits> //validación de desbordamiento al ajuste de decimales.
 
 // Funciones en ensamblador (un .asm por funcion).
 // Los nombres deben coincidir EXACTAMENTE con los PROC de los .asm.
@@ -174,6 +180,29 @@ static bool multiplicar(Numero a, Numero b, Numero& res) {
     return true;
 }
 
+//Prepara los números para que puedan sumarse correctamente.
+
+static bool ajustarParaSuma(Numero n, int decDestino,
+    long long& resultado) {
+
+    int diferencia = decDestino - n.dec;
+
+    if (diferencia < 0 || diferencia > MAX_DEC)
+        return false;
+
+    long long factor = POT10[diferencia];
+
+    // Comprobar si la multiplicacion puede desbordarse
+    if (n.valor > std::numeric_limits<long long>::max() / factor ||
+        n.valor < std::numeric_limits<long long>::min() / factor)
+        return false;
+
+    resultado = n.valor * factor;
+
+    return true;
+}
+
+
 // Devuelve false si hay error (division entre cero, overflow...).
 // Suma, resta y division siguen igual que antes: solo aceptan enteros.
 // Si les llega un numero con decimales (ej. 1.5 + 2) se marca error.
@@ -183,6 +212,58 @@ static bool ejecutarOperacion(Numero a, wchar_t op, Numero b, Numero& res) {
         res = simplificar(res);         // 1.5 * 2 = 3.0 -> 3 (vuelve a ser entero)
         return true;
     }
+
+    // suma decimal
+    if (op == L'+') {
+
+        // Obtener la mayor cantidad de decimales
+        int decResultado = (a.dec > b.dec) ? a.dec : b.dec;
+
+        long long valorA, valorB;
+
+        // Igualar las posiciones decimales
+        if (!ajustarParaSuma(a, decResultado, valorA))
+            return false;
+
+        if (!ajustarParaSuma(b, decResultado, valorB))
+            return false;
+
+        // Llamar a la funcion original de ensamblador
+        if (Suma(valorA, valorB, &res.valor) != 0)
+            return false;
+
+        res.dec = decResultado;
+        res = simplificar(res);
+
+        return true;
+    }
+
+
+    // RESTA DECIMAL
+    if (op == L'-') {
+
+        // Obtener la mayor cantidad de decimales
+        int decResultado = (a.dec > b.dec) ? a.dec : b.dec;
+
+        long long valorA, valorB;
+
+        // Igualar las posiciones decimales
+        if (!ajustarParaSuma(a, decResultado, valorA))
+            return false;
+
+        if (!ajustarParaSuma(b, decResultado, valorB))
+            return false;
+
+        // Llamar a la funcion de ensamblador
+        if (Resta(valorA, valorB, &res.valor) != 0)
+            return false;
+
+        res.dec = decResultado;
+        res = simplificar(res);
+
+        return true;
+    }
+
 
     res.dec = 0;
     if (op != 0 && (a.dec != 0 || b.dec != 0)) return false;   // decimales: todavia no soportados
