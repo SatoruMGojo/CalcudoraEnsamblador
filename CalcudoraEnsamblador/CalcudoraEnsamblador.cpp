@@ -162,6 +162,37 @@ static bool dividir(long long a, long long b, long long& res) {
     return true;
 }
 
+// Division decimal: DivisionDec iguala las escalas de los dos numeros,
+// devuelve la parte entera en 'cociente' y MAX_DEC digitos decimales en 'digitos'.
+// 7.5 / 2 -> a = {75, 1}, b = {2, 0} -> cociente = 3, digitos = "7500" -> {37500, 4} = 3.75
+static bool dividirDec(Numero a, Numero b, Numero& res) {
+    long long cociente = 0, residuo = 0;
+    char digitos[MAX_DEC] = { 0 };
+    int negativo = 0;
+
+    if (DivisionDec(a.valor, b.valor, &cociente, &residuo, digitos, MAX_DEC,
+        (unsigned long long)a.dec, (unsigned long long)b.dec, &negativo) != 0)
+        return false;                   // /0, overflow, decimales fuera de rango...
+
+    // El cociente ya trae el signo, pero si es 0 (ej. -1 / 4 = -0.25) el signo
+    // solo viene en 'negativo'; por eso se trabaja con el valor absoluto.
+    long long entero = cociente < 0 ? -cociente : cociente;
+
+    // Unir parte entera y decimales: entero * 10^MAX_DEC + digitos
+    long long fraccion = 0;
+    for (int i = 0; i < MAX_DEC; i++)
+        fraccion = fraccion * 10 + (digitos[i] - '0');
+
+    if (entero > (std::numeric_limits<long long>::max() - fraccion) / POT10[MAX_DEC])
+        return false;                   // el resultado no cabe con 4 decimales
+
+    res.valor = entero * POT10[MAX_DEC] + fraccion;
+    if (negativo) res.valor = -res.valor;
+    res.dec = MAX_DEC;
+    res = simplificar(res);             // 10 / 2 = 5.0000 -> 5
+    return true;
+}
+
 // Multiplicacion: el ensamblador multiplica los enteros y suma los decimales
 // (1.5 * 2.25 -> 15 * 225 = 3375 con 1 + 2 = 3 decimales -> 3.375).
 static bool multiplicar(Numero a, Numero b, Numero& res) {
@@ -204,8 +235,7 @@ static bool ajustarParaSuma(Numero n, int decDestino,
 
 
 // Devuelve false si hay error (division entre cero, overflow...).
-// Suma, resta y division siguen igual que antes: solo aceptan enteros.
-// Si les llega un numero con decimales (ej. 1.5 + 2) se marca error.
+// Las cuatro operaciones aceptan numeros con hasta MAX_DEC decimales.
 static bool ejecutarOperacion(Numero a, wchar_t op, Numero b, Numero& res) {
     if (op == L'*') {
         if (!multiplicar(a, b, res)) return false;
@@ -265,15 +295,12 @@ static bool ejecutarOperacion(Numero a, wchar_t op, Numero b, Numero& res) {
     }
 
 
-    res.dec = 0;
-    if (op != 0 && (a.dec != 0 || b.dec != 0)) return false;   // decimales: todavia no soportados
+    // DIVISION DECIMAL
+    if (op == L'/')
+        return dividirDec(a, b, res);
 
-    switch (op) {
-    case L'/': return dividir(a.valor, b.valor, res.valor);
-    case L'+': return Suma(a.valor, b.valor, &res.valor) == 0;
-    case L'-': return Resta(a.valor, b.valor, &res.valor) == 0;
-    default:   res = b; return true;
-    }
+    res = b;                            // sin operador pendiente
+    return true;
 }
 
 static void pulsarBoton(const wchar_t* etiqueta) {
